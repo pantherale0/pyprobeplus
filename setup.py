@@ -37,7 +37,7 @@ setuptools.setup(
     long_description_content_type="text/markdown",
     url='http://github.com/pantherale0/pyprobeplus',
     author='pantherale0',
-    license='MIT',
+    license='Apache-2.0',
     packages=setuptools.find_packages(),
     package_data={
         'pyprobeplus': [
@@ -46,7 +46,7 @@ setuptools.setup(
     },
     classifiers=[
         "Programming Language :: Python :: 3",
-        "License :: OSI Approved :: MIT License",
+        "License :: OSI Approved :: Apache Software License",
         "Operating System :: OS Independent",
     ],
     install_requires=REQUIREMENTS,
