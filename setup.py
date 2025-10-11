@@ -15,6 +15,7 @@ with open('pyprobeplus/__init__.py', 'r', encoding='utf8') as version_file:
 
 REQUIREMENTS = [
     'bleak',
+    'bleak-retry-connector',
 ]
 
 DEV_REQUIREMENTS = [

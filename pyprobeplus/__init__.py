@@ -10,8 +10,9 @@ import time
 
 from collections.abc import Awaitable, Callable
 
-from bleak import BleakClient, BleakGATTCharacteristic, BLEDevice
+from bleak import BleakGATTCharacteristic, BLEDevice
 from bleak.exc import BleakError
+from bleak_retry_connector import BleakClientWithServiceCache, establish_connection
 
 from .const import BLE_DATA_RECEIVE
 from .exceptions import ProbePlusDeviceNotFound, ProbePlusError
@@ -30,7 +31,7 @@ class ProbePlusDevice:
     ) -> None:
         """Initialize the probe."""
 
-        self._client: BleakClient | None = None
+        self._client: BleakClientWithServiceCache | None = None
 
         self.address_or_ble_device = address_or_ble_device
         self.name = name
@@ -70,7 +71,7 @@ class ProbePlusDevice:
 
     def device_disconnected_handler(
         self,
-        client: BleakClient | None = None,  # pylint: disable=unused-argument
+        client: BleakClientWithServiceCache | None = None,  # pylint: disable=unused-argument
         notify: bool = True,
     ) -> None:
         """Callback for device disconnected."""
@@ -134,28 +135,19 @@ class ProbePlusDevice:
             )
             return
 
-        self._client = BleakClient(
-            address_or_ble_device=self.address_or_ble_device,
-            disconnected_callback=self.device_disconnected_handler,
-        )
-
         try:
-            await self._client.connect()
+            self._client = await establish_connection(
+                BleakClientWithServiceCache,
+                self.address_or_ble_device,
+                self.name or "Probe Plus",
+                disconnected_callback=self.device_disconnected_handler,
+            )
         except BleakError as ex:
-            msg = "Error during connecting to device"
-            _LOGGER.debug("%s: %s", msg, ex)
-            raise ProbePlusError(msg) from ex
-        except TimeoutError as ex:
-            msg = "Timeout during connecting to device"
-            _LOGGER.debug("%s: %s", msg, ex)
-            raise ProbePlusError(msg) from ex
-        except Exception as ex:
-            msg = "Unknown error during connecting to device"
-            _LOGGER.debug("%s: %s", msg, ex)
-            raise ProbePlusError(msg) from ex
+            _LOGGER.debug("Error connecting to device: %s", ex)
+            raise ProbePlusError("Error connecting to device") from ex
 
         self.connected = True
-        _LOGGER.debug("Connected to Acaia probe")
+        _LOGGER.debug("Connected to Probe Plus device")
 
         if callback is None:
             callback = self.on_bluetooth_data_received
