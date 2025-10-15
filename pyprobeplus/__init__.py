@@ -10,7 +10,7 @@ import time
 
 from collections.abc import Awaitable, Callable
 
-from bleak import BleakGATTCharacteristic, BLEDevice
+from bleak import BleakScanner, BleakGATTCharacteristic, BLEDevice
 from bleak.exc import BleakError
 from bleak_retry_connector import BleakClientWithServiceCache, establish_connection
 
@@ -135,11 +135,19 @@ class ProbePlusDevice:
             )
             return
 
+        # Find the device
+        device = await BleakScanner.find_device_by_address("AA:BB:CC:DD:EE:FF")
+
+        if device is None:
+            _LOGGER.debug("Device %s not found", self.mac)
+            return
+
         try:
             self._client = await establish_connection(
                 BleakClientWithServiceCache,
-                self.address_or_ble_device,
-                self.name or "Probe Plus",
+                device,
+                device.name,
+                max_attempts=3,
                 disconnected_callback=self.device_disconnected_handler,
             )
         except BleakError as ex:
