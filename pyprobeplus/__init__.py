@@ -26,11 +26,13 @@ class ProbePlusDevice:
     def __init__(
         self,
         address_or_ble_device: str | BLEDevice,
+        scanner: BleakScanner | None = None,
         name: str | None = None,
         notify_callback: Callable[[], None] | None = None,
     ) -> None:
         """Initialize the probe."""
 
+        self._scanner = scanner if scanner else BleakScanner()
         self._client: BleakClientWithServiceCache | None = None
 
         self.address_or_ble_device = address_or_ble_device
@@ -136,7 +138,7 @@ class ProbePlusDevice:
             return
 
         # Find the device
-        device = await BleakScanner.find_device_by_address("AA:BB:CC:DD:EE:FF")
+        device = await self._scanner.find_device_by_address("AA:BB:CC:DD:EE:FF")
 
         if device is None:
             _LOGGER.debug("Device %s not found", self.mac)
