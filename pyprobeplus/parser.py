@@ -29,6 +29,8 @@ class ProbePlusData:
     probe_temperature: float | None = None
     probe_rssi: float | None = None
     probe_temperature_2: float | None = None  # FM22xx series: second probe channel
+    target_1: float | None = None  # FM22xx: CH1 alarm target (None = not set)
+    target_2: float | None = None  # FM22xx: CH2 alarm target (None = not set)
 
 
 def _parse_temperature_fmc(temp_bytes: bytearray) -> float:
@@ -97,6 +99,22 @@ class ParserBase:
                 channel,
                 self.state.probe_temperature if channel <= 1 else self.state.probe_temperature_2,
             )
+            return self.state
+
+        elif len(data) == 41 and data[0] == 0x00 and data[1] == 0x05:
+            # FM22xx STATUS frame — contains current alarm targets at fixed offsets
+            ch1_raw = int.from_bytes(data[11:13], 'little')
+            ch2_raw = int.from_bytes(data[20:22], 'little')
+            self.state.target_1 = None if ch1_raw == 0xFFFF else ch1_raw / FM22_TEMP_DIVISOR
+            self.state.target_2 = None if ch2_raw == 0xFFFF else ch2_raw / FM22_TEMP_DIVISOR
+            return self.state
+
+        elif len(data) >= 7 and data[0] == 0x00 and data[1] == 0x03:
+            # FM22xx TARGET notification — fired when target changes (set/cleared)
+            ch1_raw = int.from_bytes(data[3:5], 'little')
+            ch2_raw = int.from_bytes(data[5:7], 'little')
+            self.state.target_1 = None if ch1_raw == 0xFFFF else ch1_raw / FM22_TEMP_DIVISOR
+            self.state.target_2 = None if ch2_raw == 0xFFFF else ch2_raw / FM22_TEMP_DIVISOR
             return self.state
 
         elif len(data) == 8 and data[0] == 0x00 and data[1] == 0x01:
