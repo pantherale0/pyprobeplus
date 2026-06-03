@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-__version__ = "1.0.1"
+__version__ = "1.1.3"
 
 import asyncio
 import logging
@@ -138,7 +138,7 @@ class ProbePlusDevice:
             return
 
         # Find the device
-        device = await self._scanner.find_device_by_address("AA:BB:CC:DD:EE:FF")
+        device = await self._scanner.find_device_by_address(self.mac)
 
         if device is None:
             _LOGGER.debug("Device %s not found", self.mac)
