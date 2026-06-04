@@ -28,9 +28,10 @@ class ProbePlusData:
     probe_voltage: float | None = None
     probe_temperature: float | None = None
     probe_rssi: float | None = None
-    probe_temperature_2: float | None = None  # FM22xx series: second probe channel
-    probe_battery_2: float | None = None      # FM22xx series: second probe battery
-    ambient_temperature: float | None = None  # FM22xx series: oven/grill temperature (炉温)
+    probe_temperature_2: float | None = None    # FM22xx series: second probe channel
+    probe_battery_2: float | None = None        # FM22xx series: second probe battery
+    ambient_temperature: float | None = None    # FM22xx series: ambient at probe 1 (炉温 ch1)
+    ambient_temperature_2: float | None = None  # FM22xx series: ambient at probe 2 (炉温 ch2)
     target_1: float | None = None  # FM22xx: CH1 alarm target (None = not set)
     target_2: float | None = None  # FM22xx: CH2 alarm target (None = not set)
 
@@ -92,19 +93,17 @@ class ParserBase:
                 self.state.probe_battery = probe_battery
                 self.state.probe_temperature = _parse_temperature_fmc(temp_bytes)
             elif channel == 1:
-                # FM22xx: channel 1 -> probe_temperature + probe_battery
+                # FM22xx: channel 1 -> probe_temperature + probe_battery + ambient 1
                 self._is_fm22 = True
                 self.state.probe_battery = probe_battery
                 self.state.probe_temperature = _parse_temperature_fm22(temp_bytes)
-                # bytes 6-7: oven/grill temperature (炉温), little-endian int16 / 10 °C
-                self.state.ambient_temperature = int.from_bytes(data[6:8], 'little', signed=True) / FM22_TEMP_DIVISOR
+                self.state.ambient_temperature = _parse_temperature_fm22(data[6:8])
             else:
-                # FM22xx: channel 2+ -> probe_temperature_2 + probe_battery_2
+                # FM22xx: channel 2+ -> probe_temperature_2 + probe_battery_2 + ambient 2
                 self._is_fm22 = True
                 self.state.probe_battery_2 = probe_battery
                 self.state.probe_temperature_2 = _parse_temperature_fm22(temp_bytes)
-                # bytes 6-7: oven/grill temperature (same sensor, overwrite is fine)
-                self.state.ambient_temperature = int.from_bytes(data[6:8], 'little', signed=True) / FM22_TEMP_DIVISOR
+                self.state.ambient_temperature_2 = _parse_temperature_fm22(data[6:8])
 
             # RSSI is a signed dBm value encoded as a single byte
             self.state.probe_rssi = int.from_bytes([data[8]], signed=True)
@@ -134,9 +133,9 @@ class ParserBase:
             return self.state
 
         elif len(data) == 8 and data[0] == 0x00 and data[1] == 0x01:
-            # Relay/station state frame
-            voltage_bytes = data[2:4]
-            self.state.relay_voltage = struct.unpack(">H", voltage_bytes)[0] / RELAY_VOLTAGE_DIVISOR
+            # Relay/station state frame — FM22xx: little-endian, FMC: big-endian
+            endian = 'little' if self._is_fm22 else 'big'
+            self.state.relay_voltage = int.from_bytes(data[2:4], endian) / RELAY_VOLTAGE_DIVISOR
             _LOGGER.debug(">> Relay voltage: %sV", self.state.relay_voltage)
             if self._is_fm22:
                 # FM22xx thresholds from OEM app (mV: >=3900/3700/3460)
