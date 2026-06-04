@@ -29,6 +29,7 @@ class ProbePlusDevice:
         scanner: BleakScanner | None = None,
         name: str | None = None,
         notify_callback: Callable[[], None] | None = None,
+        is_fm22: bool = False,
     ) -> None:
         """Initialize the probe."""
 
@@ -47,7 +48,7 @@ class ProbePlusDevice:
         self._timestamp_last_command: float | None = None
         self.last_disconnect_time: float | None = None
 
-        self._device_state: ParserBase | None = ParserBase()
+        self._device_state: ParserBase | None = ParserBase(is_fm22=is_fm22)
 
         # queue
         self._queue: asyncio.Queue = asyncio.Queue()
@@ -200,10 +201,8 @@ class ProbePlusDevice:
     async def write_target(self, ch: int, temp_c: float) -> None:
         """Set alarm target temperature for a channel (FM22xx only).
 
-        Protocol (reverse-engineered from Outdoorchef FM2201+ / Easy Check BBQ app):
-          01 03 [CH] [temp_lo] [temp_hi]
-        Temperature in tenths of degrees Celsius, little-endian uint16.
-        Verified on FM2201+ hardware.
+        Protocol: 01 03 [CH] [temp_lo] [temp_hi]
+        Temperature in tenths of degrees, little-endian.
         """
         if not self.connected or self._client is None:
             raise ProbePlusError("Device not connected")
