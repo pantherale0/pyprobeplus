@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-__version__ = "1.1.3"
+__version__ = "1.2.0"
 
 import asyncio
 import logging
@@ -14,7 +14,7 @@ from bleak import BleakScanner, BleakGATTCharacteristic, BLEDevice
 from bleak.exc import BleakError
 from bleak_retry_connector import BleakClientWithServiceCache, establish_connection
 
-from .const import BLE_DATA_RECEIVE
+from .const import BLE_DATA_RECEIVE, BLE_DATA_WRITE
 from .exceptions import ProbePlusDeviceNotFound, ProbePlusError
 from .parser import ParserBase, ProbePlusData
 
@@ -29,6 +29,7 @@ class ProbePlusDevice:
         scanner: BleakScanner | None = None,
         name: str | None = None,
         notify_callback: Callable[[], None] | None = None,
+        is_fm22: bool = False,
     ) -> None:
         """Initialize the probe."""
 
@@ -47,7 +48,7 @@ class ProbePlusDevice:
         self._timestamp_last_command: float | None = None
         self.last_disconnect_time: float | None = None
 
-        self._device_state: ParserBase | None = ParserBase()
+        self._device_state: ParserBase | None = ParserBase(is_fm22=is_fm22)
 
         # queue
         self._queue: asyncio.Queue = asyncio.Queue()
@@ -196,6 +197,42 @@ class ProbePlusDevice:
             _LOGGER.debug("Error disconnecting from device: %s", ex)
         else:
             _LOGGER.debug("Disconnected from probe")
+
+    async def write_target(self, ch: int, temp_c: float) -> None:
+        """Set alarm target temperature for a channel (FM22xx only).
+
+        Protocol: 01 03 [CH] [temp_lo] [temp_hi]
+        Temperature in tenths of degrees, little-endian.
+        """
+        if not self.connected or self._client is None:
+            raise ProbePlusError("Device not connected")
+        if ch not in (1, 2):
+            raise ProbePlusError(f"Invalid channel {ch}: expected 1 or 2")
+        raw = int(round(temp_c * 10))
+        if raw < 0 or raw >= 0xFFFF:
+            raise ProbePlusError(f"Target temperature {temp_c} out of supported range")
+        payload = bytes([0x01, 0x03, ch, raw & 0xFF, (raw >> 8) & 0xFF])
+        _LOGGER.debug("write_target ch=%d temp=%.1f payload=%s", ch, temp_c, payload.hex())
+        try:
+            await self._client.write_gatt_char(BLE_DATA_WRITE, payload, response=False)
+        except BleakError as ex:
+            raise ProbePlusError("Error writing target temperature") from ex
+
+    async def clear_target(self, ch: int) -> None:
+        """Clear alarm target for a channel (FM22xx only).
+
+        Protocol: 02 03 [CH]
+        """
+        if not self.connected or self._client is None:
+            raise ProbePlusError("Device not connected")
+        if ch not in (1, 2):
+            raise ProbePlusError(f"Invalid channel {ch}: expected 1 or 2")
+        payload = bytes([0x02, 0x03, ch])
+        _LOGGER.debug("clear_target ch=%d payload=%s", ch, payload.hex())
+        try:
+            await self._client.write_gatt_char(BLE_DATA_WRITE, payload, response=False)
+        except BleakError as ex:
+            raise ProbePlusError("Error clearing target temperature") from ex
 
     async def on_bluetooth_data_received(
         self,

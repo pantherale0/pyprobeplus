@@ -29,6 +29,10 @@ class ProbePlusData:
     probe_temperature: float | None = None
     probe_rssi: float | None = None
     probe_temperature_2: float | None = None  # FM22xx series: second probe channel
+    probe_battery_2: float | None = None      # FM22xx series: second probe battery
+    ambient_temperature: float | None = None  # FM22xx series: oven/grill temperature (炉温)
+    target_1: float | None = None  # FM22xx: CH1 alarm target (None = not set)
+    target_2: float | None = None  # FM22xx: CH2 alarm target (None = not set)
 
 
 def _parse_temperature_fmc(temp_bytes: bytearray) -> float:
@@ -57,8 +61,9 @@ class ParserBase:
     - data[2] != 0x00: FM22xx series (FM2201+) — multi-channel, 0.1 deg C resolution
     """
 
-    def __init__(self) -> None:
+    def __init__(self, is_fm22: bool = False) -> None:
         self.state: ProbePlusData = ProbePlusData()
+        self._is_fm22: bool = is_fm22  # set from model at init; also detected at runtime
 
     def parse_data(self, data: bytearray):
         """Handle data notification updates from the device."""
@@ -70,28 +75,39 @@ class ParserBase:
             probe_voltage = data[3] * PROBE_VOLTAGE_FACTOR
 
             if probe_voltage >= 2.0:
-                self.state.probe_battery = 100
+                probe_battery = 100
             elif probe_voltage >= 1.7:
-                self.state.probe_battery = 51
+                probe_battery = 51
             elif probe_voltage >= 1.5:
-                self.state.probe_battery = 26
+                probe_battery = 26
             else:
-                self.state.probe_battery = 20
+                probe_battery = 20
 
             self.state.probe_voltage = probe_voltage
             temp_bytes = bytearray(data[4:6])
 
             if channel == 0:
                 # FMC series: single channel 0, original formula
+                self._is_fm22 = False
+                self.state.probe_battery = probe_battery
                 self.state.probe_temperature = _parse_temperature_fmc(temp_bytes)
             elif channel == 1:
-                # FM22xx: channel 1 -> probe_temperature
+                # FM22xx: channel 1 -> probe_temperature + probe_battery
+                self._is_fm22 = True
+                self.state.probe_battery = probe_battery
                 self.state.probe_temperature = _parse_temperature_fm22(temp_bytes)
+                # bytes 6-7: oven/grill temperature (炉温), little-endian int16 / 10 °C
+                self.state.ambient_temperature = int.from_bytes(data[6:8], 'little', signed=True) / FM22_TEMP_DIVISOR
             else:
-                # FM22xx: channel 2+ -> probe_temperature_2
+                # FM22xx: channel 2+ -> probe_temperature_2 + probe_battery_2
+                self._is_fm22 = True
+                self.state.probe_battery_2 = probe_battery
                 self.state.probe_temperature_2 = _parse_temperature_fm22(temp_bytes)
+                # bytes 6-7: oven/grill temperature (same sensor, overwrite is fine)
+                self.state.ambient_temperature = int.from_bytes(data[6:8], 'little', signed=True) / FM22_TEMP_DIVISOR
 
-            self.state.probe_rssi = data[8]
+            # RSSI is a signed dBm value encoded as a single byte
+            self.state.probe_rssi = int.from_bytes([data[8]], signed=True)
             _LOGGER.debug(
                 ">> Parsed temperature (ch%d): %s",
                 channel,
@@ -99,24 +115,51 @@ class ParserBase:
             )
             return self.state
 
+        elif len(data) == 41 and data[0] == 0x00 and data[1] == 0x05:
+            # FM22xx STATUS frame — contains current alarm targets at fixed offsets
+            self._is_fm22 = True
+            ch1_raw = int.from_bytes(data[11:13], 'little')
+            ch2_raw = int.from_bytes(data[20:22], 'little')
+            self.state.target_1 = None if ch1_raw == 0xFFFF else ch1_raw / FM22_TEMP_DIVISOR
+            self.state.target_2 = None if ch2_raw == 0xFFFF else ch2_raw / FM22_TEMP_DIVISOR
+            return self.state
+
+        elif len(data) >= 7 and data[0] == 0x00 and data[1] == 0x03:
+            # FM22xx TARGET notification — fired when target changes (set/cleared)
+            self._is_fm22 = True
+            ch1_raw = int.from_bytes(data[3:5], 'little')
+            ch2_raw = int.from_bytes(data[5:7], 'little')
+            self.state.target_1 = None if ch1_raw == 0xFFFF else ch1_raw / FM22_TEMP_DIVISOR
+            self.state.target_2 = None if ch2_raw == 0xFFFF else ch2_raw / FM22_TEMP_DIVISOR
+            return self.state
+
         elif len(data) == 8 and data[0] == 0x00 and data[1] == 0x01:
-            # Relay state frame (same for all device families)
+            # Relay/station state frame
             voltage_bytes = data[2:4]
             self.state.relay_voltage = struct.unpack(">H", voltage_bytes)[0] / RELAY_VOLTAGE_DIVISOR
             _LOGGER.debug(">> Relay voltage: %sV", self.state.relay_voltage)
-            if self.state.relay_voltage > 3.87:
-                self.state.relay_battery = 100
-            elif self.state.relay_voltage >= 3.7:
-                self.state.relay_battery = 74
-            elif self.state.relay_voltage >= 3.6:
-                self.state.relay_battery = 49
+            if self._is_fm22:
+                # FM22xx thresholds from OEM app (mV: >=3900/3700/3460)
+                if self.state.relay_voltage >= 3.9:
+                    self.state.relay_battery = 100
+                elif self.state.relay_voltage >= 3.7:
+                    self.state.relay_battery = 74
+                elif self.state.relay_voltage >= 3.46:
+                    self.state.relay_battery = 49
+                else:
+                    self.state.relay_battery = 0
             else:
-                self.state.relay_battery = 0
+                # FMC series thresholds (original)
+                if self.state.relay_voltage > 3.87:
+                    self.state.relay_battery = 100
+                elif self.state.relay_voltage >= 3.7:
+                    self.state.relay_battery = 74
+                elif self.state.relay_voltage >= 3.6:
+                    self.state.relay_battery = 49
+                else:
+                    self.state.relay_battery = 0
 
-            if len(data) > 4:
-                self.state.relay_status = int(data[4])
-            else:
-                self.state.relay_status = None
+            self.state.relay_status = int(data[4])
             _LOGGER.debug(">> Relay state %s", self.state.relay_status)
             return self.state
 
