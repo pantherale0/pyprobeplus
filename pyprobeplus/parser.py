@@ -97,13 +97,13 @@ class ParserBase:
                 self._is_fm22 = True
                 self.state.probe_battery = probe_battery
                 self.state.probe_temperature = _parse_temperature_fm22(temp_bytes)
-                self.state.ambient_temperature = int.from_bytes(data[6:8], 'little', signed=True) / FM22_TEMP_DIVISOR
+                self.state.ambient_temperature = _parse_temperature_fm22(data[6:8])
             else:
                 # FM22xx: channel 2+ -> probe_temperature_2 + probe_battery_2 + ambient 2
                 self._is_fm22 = True
                 self.state.probe_battery_2 = probe_battery
                 self.state.probe_temperature_2 = _parse_temperature_fm22(temp_bytes)
-                self.state.ambient_temperature_2 = int.from_bytes(data[6:8], 'little', signed=True) / FM22_TEMP_DIVISOR
+                self.state.ambient_temperature_2 = _parse_temperature_fm22(data[6:8])
 
             # RSSI is a signed dBm value encoded as a single byte
             self.state.probe_rssi = int.from_bytes([data[8]], signed=True)
@@ -133,8 +133,9 @@ class ParserBase:
             return self.state
 
         elif len(data) == 8 and data[0] == 0x00 and data[1] == 0x01:
-            # Relay/station state frame — voltage is little-endian uint16
-            self.state.relay_voltage = int.from_bytes(data[2:4], 'little') / RELAY_VOLTAGE_DIVISOR
+            # Relay/station state frame — FM22xx: little-endian, FMC: big-endian
+            endian = 'little' if self._is_fm22 else 'big'
+            self.state.relay_voltage = int.from_bytes(data[2:4], endian) / RELAY_VOLTAGE_DIVISOR
             _LOGGER.debug(">> Relay voltage: %sV", self.state.relay_voltage)
             if self._is_fm22:
                 # FM22xx thresholds from OEM app (mV: >=3900/3700/3460)
