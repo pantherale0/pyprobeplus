@@ -134,9 +134,8 @@ class ParserBase:
             return self.state
 
         elif len(data) == 8 and data[0] == 0x00 and data[1] == 0x01:
-            # Relay/station state frame
-            voltage_bytes = data[2:4]
-            self.state.relay_voltage = struct.unpack(">H", voltage_bytes)[0] / RELAY_VOLTAGE_DIVISOR
+            # Relay/station state frame — voltage is little-endian uint16
+            self.state.relay_voltage = int.from_bytes(data[2:4], 'little') / RELAY_VOLTAGE_DIVISOR
             _LOGGER.debug(">> Relay voltage: %sV", self.state.relay_voltage)
             if self._is_fm22:
                 # FM22xx thresholds from OEM app (mV: >=3900/3700/3460)
