@@ -206,7 +206,11 @@ class ProbePlusDevice:
         """
         if not self.connected or self._client is None:
             raise ProbePlusError("Device not connected")
+        if ch not in (1, 2):
+            raise ProbePlusError(f"Invalid channel {ch}: expected 1 or 2")
         raw = int(round(temp_c * 10))
+        if raw < 0 or raw >= 0xFFFF:
+            raise ProbePlusError(f"Target temperature {temp_c} out of supported range")
         payload = bytes([0x01, 0x03, ch, raw & 0xFF, (raw >> 8) & 0xFF])
         _LOGGER.debug("write_target ch=%d temp=%.1f payload=%s", ch, temp_c, payload.hex())
         try:
@@ -221,6 +225,8 @@ class ProbePlusDevice:
         """
         if not self.connected or self._client is None:
             raise ProbePlusError("Device not connected")
+        if ch not in (1, 2):
+            raise ProbePlusError(f"Invalid channel {ch}: expected 1 or 2")
         payload = bytes([0x02, 0x03, ch])
         _LOGGER.debug("clear_target ch=%d payload=%s", ch, payload.hex())
         try:

@@ -88,6 +88,7 @@ class ParserBase:
 
             if channel == 0:
                 # FMC series: single channel 0, original formula
+                self._is_fm22 = False
                 self.state.probe_battery = probe_battery
                 self.state.probe_temperature = _parse_temperature_fmc(temp_bytes)
             elif channel == 1:
@@ -105,7 +106,8 @@ class ParserBase:
                 # bytes 6-7: oven/grill temperature (same sensor, overwrite is fine)
                 self.state.ambient_temperature = int.from_bytes(data[6:8], 'little', signed=True) / FM22_TEMP_DIVISOR
 
-            self.state.probe_rssi = data[8]
+            # RSSI is a signed dBm value encoded as a single byte
+            self.state.probe_rssi = int.from_bytes([data[8]], signed=True)
             _LOGGER.debug(
                 ">> Parsed temperature (ch%d): %s",
                 channel,
@@ -115,6 +117,7 @@ class ParserBase:
 
         elif len(data) == 41 and data[0] == 0x00 and data[1] == 0x05:
             # FM22xx STATUS frame — contains current alarm targets at fixed offsets
+            self._is_fm22 = True
             ch1_raw = int.from_bytes(data[11:13], 'little')
             ch2_raw = int.from_bytes(data[20:22], 'little')
             self.state.target_1 = None if ch1_raw == 0xFFFF else ch1_raw / FM22_TEMP_DIVISOR
@@ -123,6 +126,7 @@ class ParserBase:
 
         elif len(data) >= 7 and data[0] == 0x00 and data[1] == 0x03:
             # FM22xx TARGET notification — fired when target changes (set/cleared)
+            self._is_fm22 = True
             ch1_raw = int.from_bytes(data[3:5], 'little')
             ch2_raw = int.from_bytes(data[5:7], 'little')
             self.state.target_1 = None if ch1_raw == 0xFFFF else ch1_raw / FM22_TEMP_DIVISOR
@@ -155,10 +159,7 @@ class ParserBase:
                 else:
                     self.state.relay_battery = 0
 
-            if len(data) > 4:
-                self.state.relay_status = int(data[4])
-            else:
-                self.state.relay_status = None
+            self.state.relay_status = int(data[4])
             _LOGGER.debug(">> Relay state %s", self.state.relay_status)
             return self.state
 
