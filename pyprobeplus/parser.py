@@ -61,6 +61,19 @@ def _u16le(data: bytes) -> int:
     return struct.unpack("<H", data)[0]
 
 
+# FM2201+ uses 0xFFFF as a "no value" sentinel (e.g. probe unplugged, or no
+# target set). Decode it to None rather than a bogus 6553.5 reading.
+FM2201_NO_VALUE = 0xFFFF
+
+
+def _fm2201_temp(data: bytes) -> float | None:
+    """Decode a little-endian FM2201+ temperature, honouring the sentinel."""
+    raw = _u16le(data)
+    if raw == FM2201_NO_VALUE:
+        return None
+    return raw / FM2201_TEMP_DIVISOR
+
+
 def _signed_rssi(value: int) -> int:
     """Interpret a byte as a signed RSSI value."""
     return value - 256 if value > 127 else value
@@ -120,8 +133,12 @@ class ParserBase:
             channel = data[2]
             probe = self._probe(channel)
             probe.battery = data[3]
-            probe.temperature = _u16le(data[4:6]) / FM2201_TEMP_DIVISOR
-            probe.ambient_temperature = _u16le(data[6:8]) / FM2201_TEMP_DIVISOR
+            temperature = _fm2201_temp(data[4:6])
+            if temperature is not None:
+                probe.temperature = temperature
+            ambient = _fm2201_temp(data[6:8])
+            if ambient is not None:
+                probe.ambient_temperature = ambient
             probe.rssi = _signed_rssi(data[8])
 
             # Backward-compat: mirror the first probe into the flat fields.
@@ -165,9 +182,15 @@ class ParserBase:
                     continue  # probe slot not present
                 probe = self._probe(index)
                 probe.battery = rec[1]
-                probe.temperature = _u16le(rec[2:4]) / FM2201_TEMP_DIVISOR
-                probe.ambient_temperature = _u16le(rec[4:6]) / FM2201_TEMP_DIVISOR
-                probe.target_temperature = _u16le(rec[6:8]) / FM2201_TEMP_DIVISOR
+                temperature = _fm2201_temp(rec[2:4])
+                if temperature is not None:
+                    probe.temperature = temperature
+                ambient = _fm2201_temp(rec[4:6])
+                if ambient is not None:
+                    probe.ambient_temperature = ambient
+                target = _fm2201_temp(rec[6:8])
+                if target is not None:
+                    probe.target_temperature = target
                 _LOGGER.debug(
                     ">> FM2201+ snapshot probe%s temp=%s ambient=%s target=%s",
                     index, probe.temperature, probe.ambient_temperature,
