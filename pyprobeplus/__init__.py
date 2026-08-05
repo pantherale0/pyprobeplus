@@ -47,7 +47,7 @@ class ProbePlusDevice:
         self._timestamp_last_command: float | None = None
         self.last_disconnect_time: float | None = None
 
-        self._device_state: ParserBase | None = ParserBase()
+        self._device_state: ParserBase | None = ParserBase(name=self.name)
 
         # queue
         self._queue: asyncio.Queue = asyncio.Queue()
