@@ -138,7 +138,7 @@ class ProbePlusDevice:
             return
 
         # Find the device
-        device = await self._scanner.find_device_by_address("AA:BB:CC:DD:EE:FF")
+        device = await self._scanner.find_device_by_address(self.mac)
 
         if device is None:
             _LOGGER.debug("Device %s not found", self.mac)
