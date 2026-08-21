@@ -153,7 +153,7 @@ def test_target_frame_does_not_fabricate_a_phantom_second_probe():
     assert state.target_2 is None
 
 
-def test_target_frame_before_any_probe_frame_is_dropped_not_fabricated():
+def test_target_frame_before_any_probe_frame_does_not_fabricate_a_probe():
     parser = Fm2Parser()
     data = frame(0x00, 0x03, 0x00, 0xFF, 0x00, 0xFF, 0xFF)
 
@@ -161,6 +161,25 @@ def test_target_frame_before_any_probe_frame_is_dropped_not_fabricated():
 
     assert state.probes == []
     assert state.target_1 is None
+
+
+def test_pending_target_is_applied_once_its_probe_frame_arrives():
+    # STATUS frame (sent at connect time) arrives before the first probe
+    # frame for that channel -> the target must not be lost.
+    parser = Fm2Parser()
+    status = bytearray(41)
+    status[0], status[1] = 0x00, 0x05
+    status[11:13] = (255).to_bytes(2, "little")  # ch1 target = 25.5 degC
+    status[20:22] = FM2_TARGET_UNSET.to_bytes(2, "little")
+    parser.parse_data(status)
+    assert parser.state.probes == []
+    assert parser.state.target_1 is None
+
+    state = parser.parse_data(
+        frame(0x00, 0x00, 0x01, 0x64, 0x00, 0x01, 0x0E, 0x01, 0xD7)
+    )
+
+    assert state.target_1 == pytest.approx(25.5)
 
 
 def test_fm2201_negative_temperature_is_signed():

@@ -205,6 +205,13 @@ class Fm2Parser(ParserBase):
     BLE sniffing against physical FM2201+ hardware).
     """
 
+    def __init__(self) -> None:
+        super().__init__()
+        # Targets for a probe slot that hasn't sent a probe frame yet (e.g.
+        # the STATUS frame arrives before the first periodic probe update).
+        # Applied as soon as that slot's first probe frame creates it.
+        self._pending_targets: dict[int, float | None] = {}
+
     def _parse_temperature(self, raw: bytearray) -> float:
         return int.from_bytes(raw, "little", signed=True) / FM2_TEMP_DIVISOR
 
@@ -235,6 +242,8 @@ class Fm2Parser(ParserBase):
         self.state.probes[slot].ambient_temperature = self._parse_temperature(
             bytearray(data[6:8])
         )
+        if slot in self._pending_targets:
+            self.state.probes[slot].target = self._pending_targets.pop(slot)
 
     def _parse_other_frame(self, data: bytearray) -> None:
         if len(data) == 41 and data[0] == 0x00 and data[1] == 0x05:
@@ -253,15 +262,17 @@ class Fm2Parser(ParserBase):
             self._set_target(slot, int.from_bytes(data[offset : offset + 2], "little"))
 
     def _set_target(self, slot: int, raw: int) -> None:
+        target = None if raw == FM2_TARGET_UNSET else raw / FM2_TEMP_DIVISOR
         # Never fabricate a probe slot from a STATUS/TARGET frame alone —
         # only a probe frame is proof the physical probe exists. A
         # single-probe device (e.g. FM210+) would otherwise gain a phantom
-        # second probe the moment such a frame arrives.
+        # second probe the moment such a frame arrives. If the STATUS frame
+        # (sent at connect time) arrives before that slot's first probe
+        # frame, remember the target and apply it once the slot is created.
         if slot >= len(self.state.probes):
+            self._pending_targets[slot] = target
             return
-        self.state.probes[slot].target = (
-            None if raw == FM2_TARGET_UNSET else raw / FM2_TEMP_DIVISOR
-        )
+        self.state.probes[slot].target = target
 
 
 def parser_for_device(name: str | None) -> ParserBase:

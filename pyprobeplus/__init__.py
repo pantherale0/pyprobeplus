@@ -49,9 +49,11 @@ class ProbePlusDevice:
 
         # Device family (FMC vs. FM2) is selected from the advertised BLE
         # name — either passed in directly, carried by a BLEDevice, or (if
-        # neither is available yet) discovered later in connect().
-        self._name_resolved = bool(name) or isinstance(address_or_ble_device, BLEDevice)
+        # neither is available yet) discovered later in connect(). A
+        # BLEDevice with no name yet (e.g. before its advertisement data is
+        # fully parsed) does NOT count as resolved — only an actual name does.
         resolved_name = name or getattr(address_or_ble_device, "name", None)
+        self._name_resolved = bool(resolved_name)
         self._device_state: ParserBase | None = parser_for_device(resolved_name)
 
         # queue
