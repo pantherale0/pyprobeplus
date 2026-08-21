@@ -48,7 +48,9 @@ class ProbePlusDevice:
         self.last_disconnect_time: float | None = None
 
         # Device family (FMC vs. FM2) is selected from the advertised BLE
-        # name — either passed in directly or carried by a BLEDevice.
+        # name — either passed in directly, carried by a BLEDevice, or (if
+        # neither is available yet) discovered later in connect().
+        self._name_resolved = bool(name) or isinstance(address_or_ble_device, BLEDevice)
         resolved_name = name or getattr(address_or_ble_device, "name", None)
         self._device_state: ParserBase | None = parser_for_device(resolved_name)
 
@@ -147,6 +149,13 @@ class ProbePlusDevice:
             _LOGGER.debug("Device %s not found", self.mac)
             return
 
+        # If the device family couldn't be resolved at construction time
+        # (e.g. constructed from a bare MAC address string with no `name`),
+        # resolve it now that the scanner has discovered the advertised name.
+        if not self._name_resolved and device.name:
+            self._device_state = parser_for_device(device.name)
+            self._name_resolved = True
+
         try:
             self._client = await establish_connection(
                 BleakClientWithServiceCache,
@@ -210,7 +219,7 @@ class ProbePlusDevice:
             raise ProbePlusError("Device not connected")
         if ch not in (1, 2):
             raise ProbePlusError(f"Invalid channel {ch}: expected 1 or 2")
-        raw = int(round(temp_c * 10))
+        raw = round(temp_c * 10)
         if raw < 0 or raw >= FM2_TARGET_UNSET:
             raise ProbePlusError(f"Target temperature {temp_c} out of supported range")
         payload = bytes([0x01, 0x03, ch, raw & 0xFF, (raw >> 8) & 0xFF])

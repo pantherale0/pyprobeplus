@@ -253,8 +253,12 @@ class Fm2Parser(ParserBase):
             self._set_target(slot, int.from_bytes(data[offset : offset + 2], "little"))
 
     def _set_target(self, slot: int, raw: int) -> None:
-        while len(self.state.probes) <= slot:
-            self.state.probes.append(ProbeReading(channel=len(self.state.probes)))
+        # Never fabricate a probe slot from a STATUS/TARGET frame alone —
+        # only a probe frame is proof the physical probe exists. A
+        # single-probe device (e.g. FM210+) would otherwise gain a phantom
+        # second probe the moment such a frame arrives.
+        if slot >= len(self.state.probes):
+            return
         self.state.probes[slot].target = (
             None if raw == FM2_TARGET_UNSET else raw / FM2_TEMP_DIVISOR
         )

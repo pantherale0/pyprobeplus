@@ -110,8 +110,15 @@ def test_fm2201_relay_frame_is_little_endian():
     assert state.relay_status == 1
 
 
+def _with_both_channels_seen(parser):
+    """Feed one probe frame per channel so probes[0]/probes[1] both exist."""
+    parser.parse_data(frame(0x00, 0x00, 0x01, 0x64, 0x00, 0x01, 0x0E, 0x01, 0xD7))
+    parser.parse_data(frame(0x00, 0x00, 0x02, 0x64, 0x00, 0x01, 0x12, 0x01, 0xD7))
+    return parser
+
+
 def test_fm2201_status_frame_sets_targets():
-    parser = Fm2Parser()
+    parser = _with_both_channels_seen(Fm2Parser())
     data = bytearray(41)
     data[0], data[1] = 0x00, 0x05
     data[11:13] = (200).to_bytes(2, "little")  # 20.0 degC
@@ -124,13 +131,36 @@ def test_fm2201_status_frame_sets_targets():
 
 
 def test_fm2201_target_frame_updates_targets():
-    parser = Fm2Parser()
+    parser = _with_both_channels_seen(Fm2Parser())
     data = frame(0x00, 0x03, 0x00, 0xFF, 0x00, 0xFF, 0xFF)  # ch1=25.5, ch2=unset
 
     state = parser.parse_data(data)
 
     assert state.target_1 == pytest.approx(25.5)
     assert state.target_2 is None
+
+
+def test_target_frame_does_not_fabricate_a_phantom_second_probe():
+    # FM210+ (single probe) style: only channel 0 has ever been seen.
+    parser = Fm2Parser()
+    parser.parse_data(frame(0x00, 0x00, 0x00, 0x3C, 0xE7, 0x00, 0xD2, 0x00, 0xF3))
+    data = frame(0x00, 0x03, 0x00, 0xFF, 0x00, 0xFF, 0xFF)  # ch1=25.5, ch2=unset
+
+    state = parser.parse_data(data)
+
+    assert state.target_1 == pytest.approx(25.5)
+    assert len(state.probes) == 1
+    assert state.target_2 is None
+
+
+def test_target_frame_before_any_probe_frame_is_dropped_not_fabricated():
+    parser = Fm2Parser()
+    data = frame(0x00, 0x03, 0x00, 0xFF, 0x00, 0xFF, 0xFF)
+
+    state = parser.parse_data(data)
+
+    assert state.probes == []
+    assert state.target_1 is None
 
 
 def test_fm2201_negative_temperature_is_signed():
