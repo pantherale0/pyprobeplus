@@ -16,7 +16,7 @@ from bleak_retry_connector import BleakClientWithServiceCache, establish_connect
 
 from .const import BLE_DATA_RECEIVE, BLE_DATA_WRITE
 from .exceptions import ProbePlusDeviceNotFound, ProbePlusError
-from .parser import ParserBase, ProbePlusData
+from .parser import FM2_TARGET_UNSET, ParserBase, ProbePlusData, parser_for_device
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -29,7 +29,6 @@ class ProbePlusDevice:
         scanner: BleakScanner | None = None,
         name: str | None = None,
         notify_callback: Callable[[], None] | None = None,
-        is_fm22: bool = False,
     ) -> None:
         """Initialize the probe."""
 
@@ -48,7 +47,10 @@ class ProbePlusDevice:
         self._timestamp_last_command: float | None = None
         self.last_disconnect_time: float | None = None
 
-        self._device_state: ParserBase | None = ParserBase(is_fm22=is_fm22)
+        # Device family (FMC vs. FM2) is selected from the advertised BLE
+        # name — either passed in directly or carried by a BLEDevice.
+        resolved_name = name or getattr(address_or_ble_device, "name", None)
+        self._device_state: ParserBase | None = parser_for_device(resolved_name)
 
         # queue
         self._queue: asyncio.Queue = asyncio.Queue()
@@ -209,7 +211,7 @@ class ProbePlusDevice:
         if ch not in (1, 2):
             raise ProbePlusError(f"Invalid channel {ch}: expected 1 or 2")
         raw = int(round(temp_c * 10))
-        if raw < 0 or raw >= 0xFFFF:
+        if raw < 0 or raw >= FM2_TARGET_UNSET:
             raise ProbePlusError(f"Target temperature {temp_c} out of supported range")
         payload = bytes([0x01, 0x03, ch, raw & 0xFF, (raw >> 8) & 0xFF])
         _LOGGER.debug("write_target ch=%d temp=%.1f payload=%s", ch, temp_c, payload.hex())
