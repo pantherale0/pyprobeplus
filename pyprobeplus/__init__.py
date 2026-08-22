@@ -7,18 +7,18 @@ __version__ = "1.0.1"
 import asyncio
 import logging
 import time
-
 from collections.abc import Awaitable, Callable
 
-from bleak import BleakScanner, BleakGATTCharacteristic, BLEDevice
+from bleak import BleakGATTCharacteristic, BleakScanner, BLEDevice
 from bleak.exc import BleakError
 from bleak_retry_connector import BleakClientWithServiceCache, establish_connection
 
 from .const import BLE_DATA_RECEIVE, BLE_DATA_WRITE
 from .exceptions import ProbePlusDeviceNotFound, ProbePlusError
-from .parser import FM2_TARGET_UNSET, ParserBase, ProbePlusData, parser_for_device
+from .parsers import FM2_TARGET_UNSET, ParserBase, ProbePlusData, parser_for_device
 
 _LOGGER = logging.getLogger(__name__)
+
 
 class ProbePlusDevice:
     """Representation of a Probe Plus device."""
@@ -47,11 +47,12 @@ class ProbePlusDevice:
         self._timestamp_last_command: float | None = None
         self.last_disconnect_time: float | None = None
 
-        # Device family (FMC vs. FM2) is selected from the advertised BLE
-        # name — either passed in directly, carried by a BLEDevice, or (if
-        # neither is available yet) discovered later in connect(). A
-        # BLEDevice with no name yet (e.g. before its advertisement data is
-        # fully parsed) does NOT count as resolved — only an actual name does.
+        # Standard vs plus is selected from the advertised BLE name (a '+'
+        # means the new probe agreement) — either passed in directly, carried
+        # by a BLEDevice, or (if neither is available yet) discovered later
+        # in connect(). A BLEDevice with no name yet (e.g. before its
+        # advertisement data is fully parsed) does NOT count as resolved —
+        # only an actual name does.
         resolved_name = name or getattr(address_or_ble_device, "name", None)
         self._name_resolved = bool(resolved_name)
         self._device_state: ParserBase | None = parser_for_device(resolved_name)
@@ -225,7 +226,9 @@ class ProbePlusDevice:
         if raw < 0 or raw >= FM2_TARGET_UNSET:
             raise ProbePlusError(f"Target temperature {temp_c} out of supported range")
         payload = bytes([0x01, 0x03, ch, raw & 0xFF, (raw >> 8) & 0xFF])
-        _LOGGER.debug("write_target ch=%d temp=%.1f payload=%s", ch, temp_c, payload.hex())
+        _LOGGER.debug(
+            "write_target ch=%d temp=%.1f payload=%s", ch, temp_c, payload.hex()
+        )
         try:
             await self._client.write_gatt_char(BLE_DATA_WRITE, payload, response=False)
         except BleakError as ex:
