@@ -77,7 +77,7 @@ class ProbePlusDevice:
         )
 
     @property
-    def device_state(self) -> ProbePlusData | None:
+    def device_state(self) -> ProbePlusData:
         """Return the device info of the probe."""
         return self._device_state.state
 
