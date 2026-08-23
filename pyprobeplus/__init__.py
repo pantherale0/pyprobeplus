@@ -16,7 +16,7 @@ from bleak.exc import BleakError
 from bleak_retry_connector import BleakClientWithServiceCache, establish_connection
 
 from .const import BLE_DATA_RECEIVE, BLE_DATA_WRITE
-from .exceptions import ProbePlusDeviceNotFound, ProbePlusError
+from .exceptions import ProbePlusDeviceNotFound, ProbePlusError, ProbePlusNotSupported
 from .parsers import FM2_TARGET_UNSET, ParserBase, ProbePlusData, parser_for_device
 
 _LOGGER = logging.getLogger(__name__)
@@ -222,6 +222,8 @@ class ProbePlusDevice:
         """
         if not self.connected or self._client is None:
             raise ProbePlusError("Device not connected")
+        if not self.name or not self.name.startswith("FM22"):
+            raise ProbePlusNotSupported()
         if ch not in (1, 2):
             raise ProbePlusError(f"Invalid channel {ch}: expected 1 or 2")
         raw = round(temp_c * 10)
@@ -243,6 +245,8 @@ class ProbePlusDevice:
         """
         if not self.connected or self._client is None:
             raise ProbePlusError("Device not connected")
+        if not self.name or not self.name.startswith("FM22"):
+            raise ProbePlusNotSupported()
         if ch not in (1, 2):
             raise ProbePlusError(f"Invalid channel {ch}: expected 1 or 2")
         payload = bytes([0x02, 0x03, ch])

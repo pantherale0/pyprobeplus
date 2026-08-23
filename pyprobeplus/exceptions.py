@@ -40,3 +40,6 @@ class ProbePlusMessageTooLong(ProbePlusMessageError):
 
     def __init__(self, bytes_recvd: bytearray) -> None:
         super().__init__(bytes_recvd, "Message too long")
+
+class ProbePlusNotSupported(ProbePlusException):
+    """Exception for functions that are not supported by a connected device."""
