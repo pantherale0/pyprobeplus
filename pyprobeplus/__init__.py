@@ -158,6 +158,7 @@ class ProbePlusDevice:
         # (e.g. constructed from a bare MAC address string with no `name`),
         # resolve it now that the scanner has discovered the advertised name.
         if not self._name_resolved and device.name:
+            self.name = device.name
             self._device_state = parser_for_device(device.name)
             self._name_resolved = True
 
