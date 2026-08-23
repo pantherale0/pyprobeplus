@@ -78,6 +78,9 @@ async def main() -> None:
                 print(f"Model: {device.name}")
                 print(f"Alarms supported: {'Y' if device.device_state.alarm_temperatures else 'N'}")
                 print(f"Probes: {len(device.device_state.probes)}")
+                print(f"Relay battery: {device.device_state.relay_battery}")
+                print(f"Relay voltage: {device.device_state.relay_voltage}")
+                print(f"Relay status: {device.device_state.relay_status}")
                 for probe in device.device_state.probes:
                     print(f"Probe temperature: {probe.temperature}")
                     print(f"Probe RSSI: {probe.rssi}")
