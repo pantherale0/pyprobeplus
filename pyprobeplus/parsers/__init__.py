@@ -16,8 +16,8 @@ def parser_for_device(name: str | None) -> ParserBase:
     (tenths of a degree, little-endian). Everything else, including an
     unknown name, uses the standard 0.0625 formula.
     """
-    name = (name or "")
-    if "FM22" in name:
+    name = (name or "").upper()
+    if "FM22" in name and "+" in name:
         return FM22Parser()
     if "+" in (name or ""):
         return PlusParser()
@@ -26,6 +26,7 @@ def parser_for_device(name: str | None) -> ParserBase:
 
 __all__ = [
     "FM2_TARGET_UNSET",
+    "FM22Parser",
     "FMStandardParser",
     "ParserBase",
     "PlusParser",

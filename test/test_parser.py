@@ -7,8 +7,9 @@ INSMART frames in GitHub issue #10 (frankyman88).
 
 import pytest
 
-from pyprobeplus.parser import (
+from pyprobeplus.parsers import (
     FM2_TARGET_UNSET,
+    FM22Parser,
     FMStandardParser,
     ParserBase,
     PlusParser,
@@ -109,7 +110,7 @@ def _status_frame(ch1_tenths: int, ch2_raw: int = FM2_TARGET_UNSET) -> bytearray
         ),
         # FM2201+ PR sniff.
         pytest.param(
-            PlusParser,
+            FM22Parser,
             bytes.fromhex("0000016400010e01d7"),
             1,
             25.6,
@@ -120,7 +121,7 @@ def _status_frame(ch1_tenths: int, ch2_raw: int = FM2_TARGET_UNSET) -> bytearray
             id="fm2201plus-ch1",
         ),
         pytest.param(
-            PlusParser,
+            FM22Parser,
             bytes.fromhex("0000026400011201d7"),
             2,
             25.6,
@@ -155,10 +156,10 @@ def test_probe_frame_from_dumps(
     assert probe.voltage == pytest.approx(voltage)
     assert probe.rssi == rssi
     assert probe.battery == battery
-    if parser_cls is FMStandardParser:
-        assert state.alarm_temperatures is None
-    else:
+    if parser_cls is FM22Parser:
         assert state.alarm_temperatures == [None, None]
+    else:
+        assert state.alarm_temperatures is None
 
 
 @pytest.mark.parametrize(
@@ -276,7 +277,8 @@ def test_relay_frame_thresholds(parser_cls, millivolts, expected_battery):
     ("parser_cls", "expected_alarms"),
     [
         (FMStandardParser, None),
-        (PlusParser, [None, None]),
+        (PlusParser, None),
+        (FM22Parser, [None, None])
     ],
 )
 def test_ignores_unrecognised_frame(parser_cls, expected_alarms):
@@ -340,14 +342,14 @@ def test_fm2201_channel_2_probe_frame_is_independent_of_channel_1():
 )
 def test_alarm_frame_updates_alarm_temperatures(payload, expected):
     """STATUS and TARGET write station alarms, not probe readings."""
-    state = _with_both_channels_seen(PlusParser()).parse_data(payload)
+    state = _with_both_channels_seen(FM22Parser()).parse_data(payload)
 
     assert state.alarm_temperatures == [pytest.approx(expected[0]), expected[1]]
 
 
 def test_target_frame_does_not_fabricate_a_phantom_second_probe():
     """A dual-slot TARGET frame on FM210+ must not invent probes[1]."""
-    parser = PlusParser()
+    parser = FM22Parser()
     parser.parse_data(frame(0x00, 0x00, 0x00, 0x3C, 0xE7, 0x00, 0xD2, 0x00, 0xF3))
     state = parser.parse_data(frame(0x00, 0x03, 0x00, 0xFF, 0x00, 0xFF, 0xFF))
 
@@ -364,7 +366,7 @@ def test_target_frame_does_not_fabricate_a_phantom_second_probe():
 )
 def test_alarm_frame_before_any_probe_frame_exposes_alarms_immediately(payload):
     """STATUS/TARGET at connect must set alarms without creating a probe slot."""
-    state = PlusParser().parse_data(payload)
+    state = FM22Parser().parse_data(payload)
 
     assert state.probes == []
     assert state.alarm_temperatures == [pytest.approx(25.5), None]
@@ -399,8 +401,8 @@ def test_parser_base_cannot_be_instantiated():
         ("FM210_coded", FMStandardParser),
         ("fm2209", FMStandardParser),
         ("FM210+", PlusParser),
-        ("FM2201+", PlusParser),
-        ("fm2201+ AA:BB:CC:DD:EE:FF", PlusParser),
+        ("FM2201+", FM22Parser),
+        ("fm2201+ AA:BB:CC:DD:EE:FF", FM22Parser),
     ],
 )
 def test_parser_for_device_dispatches_on_plus_in_name(name, expected_type):
