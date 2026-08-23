@@ -9,7 +9,9 @@ import logging
 import time
 from collections.abc import Awaitable, Callable
 
-from bleak import BleakGATTCharacteristic, BleakScanner, BLEDevice
+from bleak import BleakScanner
+from bleak.backends.characteristic import BleakGATTCharacteristic
+from bleak.backends.device import BLEDevice
 from bleak.exc import BleakError
 from bleak_retry_connector import BleakClientWithServiceCache, establish_connection
 
@@ -55,7 +57,7 @@ class ProbePlusDevice:
         # only an actual name does.
         resolved_name = name or getattr(address_or_ble_device, "name", None)
         self._name_resolved = bool(resolved_name)
-        self._device_state: ParserBase | None = parser_for_device(resolved_name)
+        self._device_state: ParserBase = parser_for_device(resolved_name)
 
         # queue
         self._queue: asyncio.Queue = asyncio.Queue()
@@ -212,7 +214,7 @@ class ProbePlusDevice:
         else:
             _LOGGER.debug("Disconnected from probe")
 
-    async def write_target(self, ch: int, temp_c: float) -> None:
+    async def set_alarm_target(self, ch: int, temp_c: float) -> None:
         """Set alarm target temperature for a channel (FM22xx only).
 
         Protocol: 01 03 [CH] [temp_lo] [temp_hi]
@@ -234,7 +236,7 @@ class ProbePlusDevice:
         except BleakError as ex:
             raise ProbePlusError("Error writing target temperature") from ex
 
-    async def clear_target(self, ch: int) -> None:
+    async def clear_alarm_target(self, ch: int) -> None:
         """Clear alarm target for a channel (FM22xx only).
 
         Protocol: 02 03 [CH]

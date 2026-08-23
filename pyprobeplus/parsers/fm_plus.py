@@ -1,5 +1,7 @@
 """Parser for FM plus devices (advertised name contains '+')."""
 
+import logging
+
 from .const import (
     FM2_TARGET_UNSET,
     PLUS_STATUS_TARGET_OFFSETS,
@@ -9,16 +11,13 @@ from .const import (
 )
 from .fm_std import FMStandardParser
 
+_LOGGER = logging.getLogger(__name__)
 
 class PlusParser(FMStandardParser):
     """Parser for the OEM new probe agreement (e.g. FM210+, FM2201+)."""
 
     RELAY_BATTERY_THRESHOLDS = (3.9, 3.7, 3.46)
     MODEL = "+"
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.state.alarm_temperatures = [None, None]
 
     def _parse_temperature(self, raw: bytearray) -> float:
         """Parse temperatures as little-endian tenths of a degree."""
@@ -60,6 +59,8 @@ class PlusParser(FMStandardParser):
 
     def _set_alarm_temperature(self, slot: int, raw: int) -> None:
         """Set a channel alarm temperature from a raw little-endian value."""
-        assert self.state.alarm_temperatures is not None
+        if not self.state.alarm_temperatures:
+            _LOGGER.warning("Alarm temperatures not available for connected device")
+            return
         alarm = None if raw == FM2_TARGET_UNSET else raw / PLUS_TEMP_DIVISOR
         self.state.alarm_temperatures[slot] = alarm
