@@ -38,7 +38,6 @@ class ProbePlusDevice:
         self._client: BleakClientWithServiceCache | None = None
 
         self.address_or_ble_device = address_or_ble_device
-        self.name = name
 
         # tasks
         self.heartbeat_task: asyncio.Task | None = None
@@ -56,6 +55,7 @@ class ProbePlusDevice:
         # advertisement data is fully parsed) does NOT count as resolved —
         # only an actual name does.
         resolved_name = name or getattr(address_or_ble_device, "name", None)
+        self.name = resolved_name
         self._name_resolved = bool(resolved_name)
         self._device_state: ParserBase = parser_for_device(resolved_name)
 
@@ -157,10 +157,14 @@ class ProbePlusDevice:
         # If the device family couldn't be resolved at construction time
         # (e.g. constructed from a bare MAC address string with no `name`),
         # resolve it now that the scanner has discovered the advertised name.
-        if not self._name_resolved and device.name:
-            self.name = device.name
-            self._device_state = parser_for_device(device.name)
-            self._name_resolved = True
+        # Also copy the advertised name onto `self.name` when we already knew
+        # the family (e.g. constructed from a BLEDevice) but never stored it.
+        if device.name:
+            if not self.name:
+                self.name = device.name
+            if not self._name_resolved:
+                self._device_state = parser_for_device(device.name)
+                self._name_resolved = True
 
         try:
             self._client = await establish_connection(

@@ -26,6 +26,7 @@ def test_parser_is_unresolved_without_a_name_at_construction():
 
     assert isinstance(device._device_state, FMStandardParser)
     assert not isinstance(device._device_state, PlusParser)
+    assert device.name is None
     assert device._name_resolved is False
 
 
@@ -33,7 +34,19 @@ def test_parser_is_resolved_immediately_when_name_is_given():
     device = ProbePlusDevice("AA:BB:CC:DD:EE:FF", scanner=MagicMock(), name="FM2201+")
 
     assert isinstance(device._device_state, PlusParser)
+    assert device.name == "FM2201+"
     assert device._name_resolved is True
+
+
+def test_name_is_taken_from_ble_device_when_not_passed():
+    ble_device = MagicMock()
+    ble_device.name = "FM210"
+    ble_device.address = "AA:BB:CC:DD:EE:FF"
+    device = ProbePlusDevice(ble_device, scanner=MagicMock())
+
+    assert device.name == "FM210"
+    assert device._name_resolved is True
+    assert isinstance(device._device_state, FMStandardParser)
 
 
 def test_connect_resolves_the_parser_from_the_discovered_name(monkeypatch):
@@ -51,6 +64,7 @@ def test_connect_resolves_the_parser_from_the_discovered_name(monkeypatch):
     asyncio.run(device.connect(setup_tasks=False))
 
     assert isinstance(device._device_state, PlusParser)
+    assert device.name == "FM2201+ AA:BB:CC:DD:EE:FF"
     assert device._name_resolved is True
 
 
@@ -69,3 +83,4 @@ def test_connect_keeps_standard_parser_for_a_standard_device(monkeypatch):
 
     assert isinstance(device._device_state, FMStandardParser)
     assert not isinstance(device._device_state, PlusParser)
+    assert device.name == "FM210 AA:BB:CC:DD:EE:FF"
