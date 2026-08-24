@@ -7,18 +7,20 @@ __version__ = "1.0.1"
 import asyncio
 import logging
 import time
-
 from collections.abc import Awaitable, Callable
 
-from bleak import BleakScanner, BleakGATTCharacteristic, BLEDevice
+from bleak import BleakScanner
+from bleak.backends.characteristic import BleakGATTCharacteristic
+from bleak.backends.device import BLEDevice
 from bleak.exc import BleakError
 from bleak_retry_connector import BleakClientWithServiceCache, establish_connection
 
 from .const import BLE_DATA_RECEIVE, BLE_DATA_WRITE
-from .exceptions import ProbePlusDeviceNotFound, ProbePlusError
-from .parser import FM2_TARGET_UNSET, ParserBase, ProbePlusData, parser_for_device
+from .exceptions import ProbePlusDeviceNotFound, ProbePlusError, ProbePlusNotSupported
+from .parsers import FM2_TARGET_UNSET, ParserBase, ProbePlusData, parser_for_device
 
 _LOGGER = logging.getLogger(__name__)
+
 
 class ProbePlusDevice:
     """Representation of a Probe Plus device."""
@@ -36,7 +38,6 @@ class ProbePlusDevice:
         self._client: BleakClientWithServiceCache | None = None
 
         self.address_or_ble_device = address_or_ble_device
-        self.name = name
 
         # tasks
         self.heartbeat_task: asyncio.Task | None = None
@@ -47,14 +48,16 @@ class ProbePlusDevice:
         self._timestamp_last_command: float | None = None
         self.last_disconnect_time: float | None = None
 
-        # Device family (FMC vs. FM2) is selected from the advertised BLE
-        # name — either passed in directly, carried by a BLEDevice, or (if
-        # neither is available yet) discovered later in connect(). A
-        # BLEDevice with no name yet (e.g. before its advertisement data is
-        # fully parsed) does NOT count as resolved — only an actual name does.
+        # Standard vs plus is selected from the advertised BLE name (a '+'
+        # means the new probe agreement) — either passed in directly, carried
+        # by a BLEDevice, or (if neither is available yet) discovered later
+        # in connect(). A BLEDevice with no name yet (e.g. before its
+        # advertisement data is fully parsed) does NOT count as resolved —
+        # only an actual name does.
         resolved_name = name or getattr(address_or_ble_device, "name", None)
+        self.name = resolved_name
         self._name_resolved = bool(resolved_name)
-        self._device_state: ParserBase | None = parser_for_device(resolved_name)
+        self._device_state: ParserBase = parser_for_device(resolved_name)
 
         # queue
         self._queue: asyncio.Queue = asyncio.Queue()
@@ -74,7 +77,7 @@ class ProbePlusDevice:
         )
 
     @property
-    def device_state(self) -> ProbePlusData | None:
+    def device_state(self) -> ProbePlusData:
         """Return the device info of the probe."""
         return self._device_state.state
 
@@ -154,9 +157,14 @@ class ProbePlusDevice:
         # If the device family couldn't be resolved at construction time
         # (e.g. constructed from a bare MAC address string with no `name`),
         # resolve it now that the scanner has discovered the advertised name.
-        if not self._name_resolved and device.name:
-            self._device_state = parser_for_device(device.name)
-            self._name_resolved = True
+        # Also copy the advertised name onto `self.name` when we already knew
+        # the family (e.g. constructed from a BLEDevice) but never stored it.
+        if device.name:
+            if not self.name:
+                self.name = device.name
+            if not self._name_resolved:
+                self._device_state = parser_for_device(device.name)
+                self._name_resolved = True
 
         try:
             self._client = await establish_connection(
@@ -211,7 +219,7 @@ class ProbePlusDevice:
         else:
             _LOGGER.debug("Disconnected from probe")
 
-    async def write_target(self, ch: int, temp_c: float) -> None:
+    async def set_alarm_target(self, ch: int, temp_c: float) -> None:
         """Set alarm target temperature for a channel (FM22xx only).
 
         Protocol: 01 03 [CH] [temp_lo] [temp_hi]
@@ -219,25 +227,31 @@ class ProbePlusDevice:
         """
         if not self.connected or self._client is None:
             raise ProbePlusError("Device not connected")
+        if not self.name or not self.name.startswith("FM22"):
+            raise ProbePlusNotSupported()
         if ch not in (1, 2):
             raise ProbePlusError(f"Invalid channel {ch}: expected 1 or 2")
         raw = round(temp_c * 10)
         if raw < 0 or raw >= FM2_TARGET_UNSET:
             raise ProbePlusError(f"Target temperature {temp_c} out of supported range")
         payload = bytes([0x01, 0x03, ch, raw & 0xFF, (raw >> 8) & 0xFF])
-        _LOGGER.debug("write_target ch=%d temp=%.1f payload=%s", ch, temp_c, payload.hex())
+        _LOGGER.debug(
+            "write_target ch=%d temp=%.1f payload=%s", ch, temp_c, payload.hex()
+        )
         try:
             await self._client.write_gatt_char(BLE_DATA_WRITE, payload, response=False)
         except BleakError as ex:
             raise ProbePlusError("Error writing target temperature") from ex
 
-    async def clear_target(self, ch: int) -> None:
+    async def clear_alarm_target(self, ch: int) -> None:
         """Clear alarm target for a channel (FM22xx only).
 
         Protocol: 02 03 [CH]
         """
         if not self.connected or self._client is None:
             raise ProbePlusError("Device not connected")
+        if not self.name or not self.name.startswith("FM22"):
+            raise ProbePlusNotSupported()
         if ch not in (1, 2):
             raise ProbePlusError(f"Invalid channel {ch}: expected 1 or 2")
         payload = bytes([0x02, 0x03, ch])
