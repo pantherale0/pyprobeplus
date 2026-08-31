@@ -45,7 +45,7 @@ class ProbePlusData:
     """Represents data from a Probe Plus device."""
 
     relay_battery_thresholds: tuple[float, float, float]
-    probes: list[ProbeReading] = field(default_factory=list)
+    probes: list[ProbeReading] = field(default_factory=lambda: [ProbeReading(1)])
     relay_voltage: float | None = None
     relay_status: int | None = None
     alarm_temperatures: list[float | None] | None = None
@@ -82,6 +82,11 @@ class ProbePlusData:
         if self.relay_voltage >= low:
             return 49
         return 0
+
+    @property
+    def probe(self) -> ProbeReading:
+        """Compatibility proxy to get a probe reading."""
+        return self.probes[0]
 
 class ParserBase(ABC):
     """Base class for Probe Plus device parsers."""
