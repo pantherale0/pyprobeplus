@@ -45,6 +45,9 @@ class FMStandardParser(ParserBase):
         probe.temperature = self._parse_temperature(bytearray(data[4:6]))
         probe.rssi = int.from_bytes(data[8:9], "big", signed=True)
         _LOGGER.debug(">> Parsed temperature (ch%d): %s", channel, probe.temperature)
+        self._mark_probe_slot_seen(slot)
+        if self._should_update_time_remaining_on_probe_frame():
+            self._update_time_remaining(slot)
 
     def _parse_relay_frame(self, data: bytearray) -> None:
         """Parse 8-byte relay/station state frame."""
@@ -52,6 +55,7 @@ class FMStandardParser(ParserBase):
         self.state.relay_status = int(data[4])
         _LOGGER.debug(">> Relay voltage: %sV", self.state.relay_voltage)
         _LOGGER.debug(">> Relay state %s", self.state.relay_status)
+        self._finalize_relay_frame()
 
     def _parse_other_frame(self, data: bytearray) -> None:
         """Handle other data frames (not used on standard devices)."""

@@ -5,6 +5,9 @@ name FM210). Plus frames come from the FM2201+ PR sniffs and the FM210+ /
 INSMART frames in GitHub issue #10 (frankyman88).
 """
 
+from datetime import timedelta
+from unittest.mock import patch
+
 import pytest
 
 from pyprobeplus.parsers import (
@@ -16,6 +19,7 @@ from pyprobeplus.parsers import (
     ProbePlusData,
     parser_for_device,
 )
+from pyprobeplus.parsers.const import PROBE_OFFLINE_MISS_THRESHOLD
 
 PARSER_CLASSES = (FMStandardParser, PlusParser)
 
@@ -368,7 +372,7 @@ def test_alarm_frame_before_any_probe_frame_exposes_alarms_immediately(payload):
     """STATUS/TARGET at connect must set alarms without creating a probe slot."""
     state = FM22Parser().parse_data(payload)
 
-    assert state.probes == []
+    assert not state.probes
     assert state.alarm_temperatures == [pytest.approx(25.5), None]
 
 
@@ -380,6 +384,153 @@ def test_fm2201_negative_temperature_is_signed():
 
     assert state.probes[0].temperature == pytest.approx(-5.0)
 
+
+def test_time_remaining_requires_a_target():
+    """Without a device alarm or cook target, time_remaining stays unset."""
+    parser = PlusParser()
+    parser.parse_data(frame(0x00, 0x00, 0x01, 0x64, 0x00, 0x01, 0x0E, 0x01, 0xD7))
+    parser.parse_data(frame(0x00, 0x00, 0x01, 0x64, 0x00, 0x64, 0x0E, 0x01, 0xD7))
+
+    assert parser.state.probes[0].time_remaining is None
+
+
+def test_cook_target_enables_time_remaining_without_device_alarm():
+    """Integrators can set a software cook target on non-FM22 devices."""
+    parser = PlusParser()
+    parser.set_cook_target(0, 60.0)
+    frame_20c = frame(0x00, 0x00, 0x01, 0x64, 0xC8, 0x00, 0xE8, 0x03, 0xD7)
+    frame_25c = frame(0x00, 0x00, 0x01, 0x64, 0xFA, 0x00, 0xE8, 0x03, 0xD7)
+
+    with patch(
+        "pyprobeplus.time_remaining_prediction.time.monotonic",
+        side_effect=[100.0, 110.0],
+    ):
+        parser.parse_data(frame_20c)
+        parser.parse_data(frame_25c)
+
+    assert parser.state.cook_targets[0] == pytest.approx(60.0)
+    assert parser.state.probes[0].time_remaining is not None
+
+
+def test_device_alarm_takes_precedence_over_cook_target():
+    """A native alarm target wins when both are set for the same slot."""
+    parser = FM22Parser()
+    parser.set_cook_target(0, 70.0)
+    parser.parse_data(_status_frame(600))
+
+    assert parser.get_target_temperature_for_slot(0) == pytest.approx(60.0)
+
+
+def test_clear_cook_target_clears_time_remaining():
+    """Clearing a cook target removes any estimate for that slot."""
+    parser = PlusParser()
+    parser.parse_data(frame(0x00, 0x00, 0x01, 0x64, 0xC8, 0x00, 0xE8, 0x03, 0xD7))
+    parser.set_cook_target(0, 60.0)
+    parser.clear_cook_target(0)
+
+    assert parser.state.cook_targets[0] is None
+    assert parser.state.probes[0].time_remaining is None
+
+
+def test_time_remaining_estimates_when_alarm_target_set():
+    """FM22 probes estimate remaining time once rate data is available."""
+    parser = FM22Parser()
+    parser.parse_data(_status_frame(600))
+    parser.parse_data(frame(0x00, 0x00, 0x01, 0x64, 0xC8, 0x00, 0xE8, 0x03, 0xD7))
+
+    estimator = parser.get_time_estimator_for_slot(0)
+    estimator.reset()
+    parser.state.probes[0].temperature = 25.0
+    assert estimator.update(20.0, 60.0, None, timestamp=0.0) is None
+    remaining = estimator.update(25.0, 60.0, None, timestamp=10.0)
+
+    assert remaining is not None
+    assert remaining > timedelta(0)
+
+
+def test_time_remaining_uses_ambient_when_available():
+    """Plus-family probes pass ambient temperature into the estimator."""
+    parser = FM22Parser()
+    parser.parse_data(_status_frame(600))
+    parser.parse_data(frame(0x00, 0x00, 0x01, 0x64, 0xC8, 0x00, 0xE8, 0x03, 0xD7))
+
+    estimator = parser.get_time_estimator_for_slot(0)
+    estimator.reset()
+    assert estimator.update(20.0, 60.0, 100.0, timestamp=0.0) is None
+    remaining = estimator.update(30.0, 60.0, 100.0, timestamp=10.0)
+
+    assert remaining is not None
+    assert remaining > timedelta(0)
+
+
+def test_time_remaining_resets_when_alarm_target_changes():
+    """A new alarm target clears prior rate state for that probe slot."""
+    parser = FM22Parser()
+    parser.parse_data(_status_frame(600))
+
+    estimator = parser.get_time_estimator_for_slot(0)
+    estimator.update(20.0, 60.0, None, timestamp=0.0)
+    estimator.update(25.0, 60.0, None, timestamp=10.0)
+    assert estimator.state.linear_rate is not None
+
+    parser.parse_data(_status_frame(700))
+
+    assert estimator.state.linear_rate is None
+
+
+def test_probe_frames_update_time_remaining_on_fm22():
+    """Two probe frames with an alarm target produce a remaining-time estimate."""
+    parser = FM22Parser()
+    parser.parse_data(_status_frame(600))
+    frame_20c = frame(0x00, 0x00, 0x01, 0x64, 0xC8, 0x00, 0xE8, 0x03, 0xD7)
+    frame_25c = frame(0x00, 0x00, 0x01, 0x64, 0xFA, 0x00, 0xE8, 0x03, 0xD7)
+
+    with patch(
+        "pyprobeplus.time_remaining_prediction.time.monotonic",
+        side_effect=[100.0, 110.0],
+    ):
+        parser.parse_data(frame_20c)
+        parser.parse_data(frame_25c)
+
+    assert parser.state.probes[0].time_remaining is not None
+    assert parser.state.probes[0].time_remaining > timedelta(0)
+
+
+def test_probe_time_estimator_clears_when_disconnected():
+    """Probes go offline after five relay cycles without a frame for that slot."""
+    parser = FM22Parser()
+    parser.parse_data(_status_frame(600))
+    ch1 = frame(0x00, 0x00, 0x01, 0x64, 0xC8, 0x00, 0xE8, 0x03, 0xD7)
+    ch2 = frame(0x00, 0x00, 0x02, 0x64, 0xC8, 0x00, 0xE8, 0x03, 0xD7)
+    relay = frame(0x00, 0x01, 0xB5, 0x0F, 0x01, 0xFF, 0xFF, 0xFF)
+
+    parser.parse_data(ch1)
+    parser.parse_data(ch2)
+    parser.parse_data(relay)
+
+    estimator = parser.get_time_estimator_for_slot(1)
+    estimator.update(20.0, 60.0, 100.0, timestamp=0.0)
+    estimator.update(25.0, 60.0, 100.0, timestamp=10.0)
+    parser.state.probes[1].time_remaining = timedelta(minutes=30)
+    assert parser.state.probes[1].online is True
+    assert estimator.state.linear_rate is not None
+
+    for _ in range(PROBE_OFFLINE_MISS_THRESHOLD - 1):
+        parser.parse_data(ch1)
+        parser.parse_data(relay)
+        assert parser.state.probes[1].online is True
+        assert estimator.state.linear_rate is not None
+
+    parser.parse_data(ch1)
+    parser.parse_data(relay)
+
+    assert parser.state.probes[1].online is False
+    assert estimator.state.linear_rate is None
+    assert parser.state.probes[1].time_remaining is None
+    assert parser.get_time_estimator_for_slot(0).state.last_food_temp is not None
+
+    parser.parse_data(ch2)
+    assert parser.state.probes[1].online is True
 
 # ---------------------------------------------------------------------------
 # Dispatch

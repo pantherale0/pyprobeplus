@@ -19,6 +19,9 @@ class PlusParser(FMStandardParser):
     RELAY_BATTERY_THRESHOLDS = (3.9, 3.7, 3.46)
     MODEL = "+"
 
+    def _should_update_time_remaining_on_probe_frame(self) -> bool:
+        return False
+
     def _parse_temperature(self, raw: bytearray) -> float:
         """Parse temperatures as little-endian tenths of a degree."""
         return int.from_bytes(raw, "little", signed=True) / PLUS_TEMP_DIVISOR
@@ -36,6 +39,7 @@ class PlusParser(FMStandardParser):
         self.state.probes[slot].ambient_temperature = self._parse_temperature(
             bytearray(data[6:8])
         )
+        self._update_time_remaining(slot)
 
     def _parse_other_frame(self, data: bytearray) -> None:
         if len(data) == 41 and data[0] == 0x00 and data[1] == 0x05:
@@ -63,4 +67,7 @@ class PlusParser(FMStandardParser):
             _LOGGER.warning("Alarm temperatures not available for connected device")
             return
         alarm = None if raw == FM2_TARGET_UNSET else raw / PLUS_TEMP_DIVISOR
+        previous = self.state.alarm_temperatures[slot]
+        if previous != alarm:
+            self._reset_time_estimator_for_slot(slot)
         self.state.alarm_temperatures[slot] = alarm

@@ -261,6 +261,26 @@ class ProbePlusDevice:
         except BleakError as ex:
             raise ProbePlusError("Error clearing target temperature") from ex
 
+    def set_cook_target(self, ch: int, temp_c: float) -> None:
+        """Set a software-only cook target for time-remaining estimates.
+
+        Use on devices that do not expose alarm temperatures (for example
+        FM210+). Does not write to the device. Channel 1 maps to the first
+        probe slot, channel 2 to the second. When the device reports an alarm
+        target for the channel, that value takes precedence.
+        """
+        if ch not in (1, 2):
+            raise ProbePlusError(f"Invalid channel {ch}: expected 1 or 2")
+        slot = 0 if ch == 1 else 1
+        self._device_state.set_cook_target(slot, temp_c)
+
+    def clear_cook_target(self, ch: int) -> None:
+        """Clear a software-only cook target for a channel."""
+        if ch not in (1, 2):
+            raise ProbePlusError(f"Invalid channel {ch}: expected 1 or 2")
+        slot = 0 if ch == 1 else 1
+        self._device_state.clear_cook_target(slot)
+
     async def on_bluetooth_data_received(
         self,
         characteristic: BleakGATTCharacteristic,  # pylint: disable=unused-argument

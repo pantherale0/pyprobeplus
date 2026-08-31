@@ -15,3 +15,7 @@ FM2_TARGET_UNSET = 0xFFFF
 PLUS_STATUS_TARGET_OFFSETS = (11, 20)
 # Offsets of the two channel targets within the TARGET notification (0x00 0x03).
 PLUS_TARGET_FRAME_OFFSETS = (3, 5)
+
+# Relay frames delimit probe broadcast cycles; mark a slot offline after this
+# many consecutive cycles without a probe frame for that slot.
+PROBE_OFFLINE_MISS_THRESHOLD = 5
